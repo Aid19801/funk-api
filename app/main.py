@@ -28,6 +28,10 @@ def login(db: Session = Depends(get_db), credentials: schemas.UserIn = ...):
         raise HTTPException(status_code=401, detail="Invalid credentials")
     return user
 
+@app.post("/signup", response_model=schemas.UserOut)
+def signup(user: schemas.UserIn, db: Session = Depends(get_db)):
+    return crud.create_user(db, user)
+
 @app.delete("/user/{user_id}", response_model=schemas.UserOut)
 def delete(user_id: int, db: Session = Depends(get_db)):
     user = crud.delete_user_by_id(db, user_id)
