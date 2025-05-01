@@ -1,7 +1,7 @@
 from sqlalchemy.orm import Session
 from .models import User
 from .schemas import UserIn
-from .auth import hash_password
+from .auth import hash_password, verify_password
 
 def get_user_by_email(db: Session, email: str):
     return db.query(User).filter_by(email=email).first()
@@ -18,6 +18,12 @@ def create_user(db: Session, user_in: UserIn):
     db.commit()
     db.refresh(db_user)
     return db_user
+
+def login_user(db: Session, email: str, password: str) -> User:
+    user = db.query(User).filter(User.email == email).first()
+    if not user or not verify_password(password, user.hashed_password):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    return user
 
 def get_users(db: Session):
     return db.query(User).all()

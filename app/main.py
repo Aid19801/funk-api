@@ -13,23 +13,20 @@ def get_db():
     finally:
         db.close()
 
+@app.post("/login", response_model=schemas.UserOut)
+def login(credentials: schemas.UserIn, db: Session = Depends(get_db)):
+    return crud.login_user(db, credentials.email, credentials.password)
+
+@app.post("/signup", response_model=schemas.UserOut)
+def signup(user: schemas.UserIn, db: Session = Depends(get_db)):
+    return crud.create_user(db, user)
+
 @app.get("/users", response_model=list[schemas.UserOut])
 def list_users(db: Session = Depends(get_db)):
     return crud.get_users(db)
 
 @app.post("/user", response_model=schemas.UserOut)
 def create(db: Session = Depends(get_db), user: schemas.UserIn = ...):
-    return crud.create_user(db, user)
-
-@app.post("/login", response_model=schemas.UserOut)
-def login(db: Session = Depends(get_db), credentials: schemas.UserIn = ...):
-    user = crud.get_user_by_email(db, credentials.email)
-    if not user or not auth.verify_password(credentials.password, user.hashed_password):
-        raise HTTPException(status_code=401, detail="Invalid credentials")
-    return user
-
-@app.post("/signup", response_model=schemas.UserOut)
-def signup(user: schemas.UserIn, db: Session = Depends(get_db)):
     return crud.create_user(db, user)
 
 @app.delete("/user/{user_id}", response_model=schemas.UserOut)
