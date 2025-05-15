@@ -1,7 +1,8 @@
 from fastapi import FastAPI, Depends, HTTPException
 from sqlalchemy.orm import Session
-from . import schemas, crud, auth
-from .database import SessionLocal, engine, Base
+from app import schemas, crud, auth
+from app.database import SessionLocal, engine, Base
+
 
 Base.metadata.create_all(bind=engine)
 app = FastAPI()
@@ -13,13 +14,13 @@ def get_db():
     finally:
         db.close()
 
-@app.post("/login", response_model=schemas.UserOut)
-def login(credentials: schemas.UserIn, db: Session = Depends(get_db)):
-    return crud.login_user(db, credentials.email, credentials.password)
-
 @app.post("/signup", response_model=schemas.UserOut)
 def signup(user: schemas.UserIn, db: Session = Depends(get_db)):
     return crud.create_user(db, user)
+
+@app.post("/login", response_model=schemas.UserOut)
+def login(credentials: schemas.UserIn, db: Session = Depends(get_db)):
+    return crud.login_user(db, credentials.email, credentials.password)
 
 @app.get("/users", response_model=list[schemas.UserOut])
 def list_users(db: Session = Depends(get_db)):

@@ -1,7 +1,8 @@
+from fastapi import HTTPException
 from sqlalchemy.orm import Session
-from .models import User
-from .schemas import UserIn
-from .auth import hash_password, verify_password
+from app.models import User
+from app.schemas import UserIn
+from app.auth import hash_password, verify_password
 
 def get_user_by_email(db: Session, email: str):
     return db.query(User).filter_by(email=email).first()
