@@ -1,5 +1,6 @@
 from pydantic import BaseModel
 from typing import Optional
+from datetime import datetime
 
 class UserProfile(BaseModel):
     user_id: int
@@ -12,6 +13,8 @@ class UserProfile(BaseModel):
     address_line_3: Optional[str] = None
     postcode: Optional[str] = None
     credit_card_encrypted: Optional[str] = None
+    created_at: datetime
+
 
 class CreateUserProfile(BaseModel):
     user_profile: UserProfile

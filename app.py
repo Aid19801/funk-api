@@ -1,16 +1,11 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 import psycopg2
 import bcrypt
-import os
-from dotenv import load_dotenv
 import jwt  # PyJWT
 from models import SignupRequest, LoginRequest, CreateUserProfile
 import datetime
-
-load_dotenv()
-
-DATABASE_URL = os.getenv("DATABASE_URL")
-SECRET_KEY = os.getenv("SECRET_KEY")
+from config import SECRET_KEY, DATABASE_URL
+from util import get_current_user
 
 app = FastAPI()
 
@@ -20,6 +15,29 @@ def get_conn():
 @app.get("/")
 def read_root():
     return {"Hello": "World"}
+
+@app.get("/me")
+def get_my_profile(current_email: str = Depends(get_current_user)):
+    conn = get_conn()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT up.*
+        FROM users u
+        JOIN user_profiles up ON u.id = up.user_id
+        WHERE u.email = %s
+    """, (current_email,))
+
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Profile not found.")
+
+    columns = [desc[0] for desc in cur.description]
+    profile_dict = dict(zip(columns, row))
+    return profile_dict
 
 @app.post("/signup")
 def signup(req: SignupRequest):
