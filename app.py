@@ -1,8 +1,8 @@
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Body
 import psycopg2
 import bcrypt
 import jwt  # PyJWT
-from models import SignupRequest, LoginRequest, CreateUserProfile
+from models import SignupRequest, LoginRequest, CreateUserProfile, UserProfile
 import datetime
 from config import SECRET_KEY, DATABASE_URL
 from util import get_current_user
@@ -139,3 +139,108 @@ def create_user_profile(data: CreateUserProfile):
     finally:
         cur.close()
         conn.close()
+
+
+@app.patch("/update-user-profile")
+def update_user_profile(
+        profile_data: UserProfile,
+        current_email: str = Depends(get_current_user)
+):
+    conn = get_conn()
+    cur = conn.cursor()
+
+    try:
+        # Get user_id from email
+        cur.execute("SELECT id FROM users WHERE email = %s", (current_email,))
+        user_row = cur.fetchone()
+
+        if not user_row:
+            raise HTTPException(status_code=404, detail="User not found.")
+
+        user_id = user_row[0]
+
+        # Update the profile
+        cur.execute("""
+            UPDATE user_profiles SET
+                first_name = %s,
+                last_name = %s,
+                profile_picture = %s,
+                address_line_1 = %s,
+                address_line_2 = %s,
+                address_line_3 = %s,
+                postcode = %s,
+                credit_card_encrypted = %s
+            WHERE user_id = %s
+        """, (
+            profile_data.first_name,
+            profile_data.last_name,
+            profile_data.profile_picture,
+            profile_data.address_line_1,
+            profile_data.address_line_2,
+            profile_data.address_line_3,
+            profile_data.postcode,
+            profile_data.credit_card_encrypted,
+            user_id
+        ))
+
+        conn.commit()
+        return {"message": "User profile updated successfully"}
+
+    except psycopg2.Error as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Database error: {e}")
+
+    finally:
+        cur.close()
+        conn.close()
+
+@app.post("/forgot-password")
+def forgot_password(email: str):
+    conn = get_conn()
+    cur = conn.cursor()
+
+    cur.execute("SELECT id FROM users WHERE email = %s", (email,))
+    user = cur.fetchone()
+
+    cur.close()
+    conn.close()
+
+    if not user:
+        raise HTTPException(status_code=404, detail="Email not found")
+
+    reset_token = jwt.encode(
+        {
+            "sub": email,
+            "exp": datetime.datetime.utcnow() + datetime.timedelta(minutes=30)
+        },
+        SECRET_KEY,
+        algorithm="HS256"
+    )
+
+    # TO-DO In production, send this token by email
+    return {"reset_token": reset_token}
+
+@app.post("/reset-password")
+def reset_password(token: str = Body(...), new_password: str = Body(...)):
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
+        email = payload.get("sub")
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=400, detail="Token has expired")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=400, detail="Invalid token")
+
+    hashed = bcrypt.hashpw(new_password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+
+    conn = get_conn()
+    cur = conn.cursor()
+
+    cur.execute("UPDATE users SET password_hash = %s WHERE email = %s", (hashed, email))
+    conn.commit()
+
+    cur.close()
+    conn.close()
+
+    return {"message": "Password reset successfully"}
+
+
