@@ -2,10 +2,11 @@ from fastapi import Depends, FastAPI, HTTPException, Body
 import psycopg2
 import bcrypt
 import jwt  # PyJWT
-from models import SignupRequest, LoginRequest, CreateUserProfile, UserProfile
+from models import SignupRequest, LoginRequest, CreateUserProfile, UserProfile, CreateComment
 import datetime
 from config import SECRET_KEY, DATABASE_URL
 from util import get_current_user
+from uuid import uuid4, UUID
 
 app = FastAPI()
 
@@ -14,7 +15,8 @@ def get_conn():
 
 @app.get("/")
 def read_root():
-    return {"Hello": "World"}
+    return {"Hello": "Funk-27"}
+
 
 @app.get("/me")
 def get_my_profile(current_email: str = Depends(get_current_user)):
@@ -243,4 +245,63 @@ def reset_password(token: str = Body(...), new_password: str = Body(...)):
 
     return {"message": "Password reset successfully"}
 
+@app.post("/comments")
+def create_comment(
+    comment: CreateComment,
+    current_email: str = Depends(get_current_user)
+):
+    conn = get_conn()
+    cur = conn.cursor()
 
+    try:
+        # Get the current user_id
+        cur.execute("SELECT id FROM users WHERE email = %s", (current_email,))
+        user_row = cur.fetchone()
+        if not user_row:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        user_id = user_row[0]
+
+        # Insert the comment
+        cur.execute("""
+            INSERT INTO comments (id, user_id, target_type, target_id, content)
+            VALUES (%s, %s, %s, %s, %s)
+        """, (
+            str(uuid4()),  # manually generate UUID in app
+            user_id,
+            comment.target_type,
+            str(comment.target_id),
+            comment.content
+        ))
+
+        conn.commit()
+        return {"message": "Comment posted"}
+
+    except psycopg2.Error as e:
+        conn.rollback()
+        raise HTTPException(status_code=400, detail="Comment failed: " + str(e))
+
+    finally:
+        cur.close()
+        conn.close()
+
+@app.get("/comments/{target_type}/{target_id}")
+def list_comments(target_type: str, target_id: UUID):
+    conn = get_conn()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT user_id, content, created_at
+        FROM comments
+        WHERE target_type = %s AND target_id = %s
+        ORDER BY created_at ASC
+    """, (target_type, str(target_id)))
+
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    return [
+        {"user_id": row[0], "content": row[1], "created_at": row[2].isoformat()}
+        for row in rows
+    ]

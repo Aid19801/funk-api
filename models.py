@@ -1,6 +1,14 @@
 from pydantic import BaseModel
 from typing import Optional
-from datetime import datetime
+from uuid import UUID
+
+class CommentRequest(BaseModel):
+    content: str
+
+class CreateComment(BaseModel):
+    target_type: str # "user" | "video" | "post",
+    target_id: UUID # unique ID of the page, maybe the slug?
+    content: str # the actual html string thing
 
 class UserProfile(BaseModel):
     first_name: str
