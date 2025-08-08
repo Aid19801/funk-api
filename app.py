@@ -51,23 +51,50 @@ def signup(req: SignupRequest):
     try:
         # Insert user and return their UUID
         cur.execute(
-            "INSERT INTO users (email, password_hash) VALUES (%s, %s) RETURNING id",
+            """
+            INSERT INTO users (email, password_hash)
+            VALUES (%s, %s)
+            RETURNING id
+            """,
             (req.email, hashed)
         )
         user_id = cur.fetchone()[0]
 
-        # Create blank user profile
+        # Create blank user profile and return it
         cur.execute("""
             INSERT INTO user_profiles (user_id, email)
             VALUES (%s, %s)
+            RETURNING user_id, email
         """, (user_id, req.email))
+        user_profile = cur.fetchone()
 
         conn.commit()
-        return {"message": "User and profile created successfully.", "user_id": user_id}
+
+        # Build JWT
+        payload = {
+            "sub": req.email,
+            "exp": datetime.datetime.utcnow() + datetime.timedelta(hours=1)
+        }
+        token = jwt.encode(payload, SECRET_KEY, algorithm="HS256")
+
+        return {
+            "message": "User and profile created successfully.",
+            "user_id": user_id,
+            "access_token": token,
+            "token_type": "bearer",
+            "profile": {
+                "user_id": user_profile[0],
+                "email": user_profile[1],
+                "first_name": "",
+                "last_name": "",
+                "email": req.email,
+                "profile_picture": "https://t3.ftcdn.net/jpg/11/61/33/44/360_F_1161334476_RF0ScQ0v1KQ5bRyiYIkj0SixXMJUdqly.jpg",
+            }
+        }
 
     except psycopg2.IntegrityError as e:
         conn.rollback()
-        raise HTTPException(status_code=400, detail="Signup failed: " + str(e))
+        raise HTTPException(status_code=400, detail=f"Signup failed: {e}")
 
     finally:
         cur.close()
