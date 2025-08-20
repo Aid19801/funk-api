@@ -1,4 +1,6 @@
-from fastapi import Depends, FastAPI, HTTPException, Body
+from fastapi import FastAPI, File, UploadFile, Depends, HTTPException, Body, Form
+from fastapi.staticfiles import StaticFiles
+import os
 import psycopg2
 import bcrypt
 import jwt  # PyJWT
@@ -9,6 +11,11 @@ from util import get_current_user
 from uuid import uuid4, UUID
 
 app = FastAPI()
+
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+
+UPLOAD_DIR = "uploads/profile_pics"
+os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 def get_conn():
     return psycopg2.connect(DATABASE_URL)
@@ -31,15 +38,61 @@ def get_my_profile(current_email: str = Depends(get_current_user)):
     """, (current_email,))
 
     row = cur.fetchone()
-    cur.close()
-    conn.close()
 
     if not row:
         raise HTTPException(status_code=404, detail="Profile not found.")
 
     columns = [desc[0] for desc in cur.description]
     profile_dict = dict(zip(columns, row))
+    cur.close()
+    conn.close()
     return profile_dict
+
+@app.post("/upload-profile-picture")
+async def upload_profile_picture(
+    user_id: int = Form(...), 
+    file: UploadFile = File(...)
+):
+    conn = get_conn()
+    cur = conn.cursor()
+
+    try:
+        # Get the email for this user_id
+        cur.execute("SELECT email FROM users WHERE id = %s", (user_id,))
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        email = row[0]
+
+        # Build file path
+        file_ext = os.path.splitext(file.filename)[1]
+        safe_email = email.replace("@", "_at_").replace(".", "_")
+        file_name = f"{safe_email}{file_ext}"
+        file_path = os.path.join(UPLOAD_DIR, file_name)
+
+        # Save the file
+        with open(file_path, "wb") as buffer:
+            buffer.write(await file.read())
+
+        # Update user profile with relative path
+        cur.execute(
+            "UPDATE user_profiles SET profile_picture = %s WHERE user_id = %s",
+            (f"/uploads/profile_pics/{file_name}", user_id),
+        )
+        conn.commit()
+
+        return {
+            "message": "Profile picture updated",
+            "url": f"/uploads/profile_pics/{file_name}"
+        }
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+
 
 @app.post("/signup")
 def signup(req: SignupRequest):
@@ -84,7 +137,7 @@ def signup(req: SignupRequest):
             "token_type": "bearer",
             "profile": {
                 "user_id": user_profile[0],
-                "email": user_profile[1],
+                # "email": user_profile[1],
                 "first_name": "",
                 "last_name": "",
                 "email": req.email,
