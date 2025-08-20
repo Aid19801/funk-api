@@ -9,6 +9,7 @@ import datetime
 from config import SECRET_KEY, DATABASE_URL
 from util import get_current_user
 from uuid import uuid4, UUID
+from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
 
@@ -16,6 +17,21 @@ app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 UPLOAD_DIR = "uploads/profile_pics"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+origins = [
+    "http://localhost:3000",  # your React dev server
+    "http://127.0.0.1:3000",
+    # add production frontend URL here when deployed, e.g.:
+    # "https://yourfrontend.com"
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,          # domains allowed
+    allow_credentials=True,
+    allow_methods=["*"],            # allow all HTTP methods (POST, GET, etc.)
+    allow_headers=["*"],            # allow all headers
+)
 
 def get_conn():
     return psycopg2.connect(DATABASE_URL)
@@ -50,15 +66,15 @@ def get_my_profile(current_email: str = Depends(get_current_user)):
 
 @app.post("/upload-profile-picture")
 async def upload_profile_picture(
-    user_id: int = Form(...), 
+    user_id: UUID = Form(...),
     file: UploadFile = File(...)
 ):
     conn = get_conn()
     cur = conn.cursor()
 
     try:
-        # Get the email for this user_id
-        cur.execute("SELECT email FROM users WHERE id = %s", (user_id,))
+        # Get the email for this user_id (cast UUID to str)
+        cur.execute("SELECT email FROM users WHERE id = %s", (str(user_id),))
         row = cur.fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="User not found")
@@ -75,10 +91,10 @@ async def upload_profile_picture(
         with open(file_path, "wb") as buffer:
             buffer.write(await file.read())
 
-        # Update user profile with relative path
+        # Update user profile with relative path (cast UUID to str again)
         cur.execute(
             "UPDATE user_profiles SET profile_picture = %s WHERE user_id = %s",
-            (f"/uploads/profile_pics/{file_name}", user_id),
+            (f"/uploads/profile_pics/{file_name}", str(user_id)),
         )
         conn.commit()
 
