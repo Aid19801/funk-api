@@ -7,14 +7,10 @@ from db import get_conn
 auth_scheme = HTTPBearer()
 
 def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(auth_scheme)):
-    print("BEEEEEEE ===========")
-    print("Raw credentials:", credentials.credentials)
     token = credentials.credentials
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
-        print("Decoded payload:", payload)
         user_id = payload.get("sub")
-        print("user_id??", user_id)
         if not user_id:
             raise HTTPException(status_code=401, detail="Invalid token.")
         conn = get_conn()
