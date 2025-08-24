@@ -243,6 +243,41 @@ def create_user_profile(data: CreateUserProfile):
     finally:
         cur.close()
         conn.close()
+@app.get("/user/{user_id}")
+def get_user(user_id: str):
+    print("used_id ========>> ", user_id)
+    conn = get_conn()
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT user_id, first_name, last_name, email, profile_picture, created_at
+            FROM user_profiles
+            WHERE user_id = %s
+            """,
+            (user_id,),
+        )
+        row = cur.fetchone()
+        print("row========== >> ", row)
+        if not row:
+                raise HTTPException(status_code=404, detail="User not found")
+
+        user = {
+            "user_id": row[0],
+            "first_name": row[1],
+            "profile_picture": row[4],
+            "created_at": row[5],
+        }
+        print("returning this ========== >> ", user)
+        return user
+
+    except psycopg2.Error as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {e}")
+    finally:
+        cur.close()
+        conn.close()
+
 
 @app.patch("/update-user-profile")
 def update_user_profile(
@@ -368,6 +403,7 @@ def create_comment(
 
 @app.get("/comments/{target_type}/{target_id}")
 def list_comments(target_type: str, target_id: UUID):
+    print("========= NO: list_comments firing =======")
     conn = get_conn()
     cur = conn.cursor()
     try:
@@ -381,6 +417,7 @@ def list_comments(target_type: str, target_id: UUID):
             (target_type, str(target_id)),
         )
         rows = cur.fetchall()
+        
         return [
             {"user_id": row[0], "content": row[1], "created_at": row[2].isoformat()}
             for row in rows
@@ -405,6 +442,36 @@ def list_my_comments(current_user: dict = Depends(get_current_user)):
             (current_user["id"],),  # <-- use the UUID string
         )
         rows = cur.fetchall()
+        comments = [
+            {"id": row[0], "content": row[1], "created_at": row[2].isoformat()}
+            for row in rows
+        ]
+        return {"comments": comments}
+    finally:
+        cur.close()
+        conn.close()
+
+@app.get("/recent_activity/{user_id}")
+def list_user_comments(user_id: str):
+    print("====== is this even firing tho? ===========")
+    conn = get_conn()
+    cur = conn.cursor()
+    print(2222222)
+    try:
+        cur.execute(
+            """
+            SELECT id, content, created_at
+            FROM comments
+            WHERE user_id = %s
+            ORDER BY created_at DESC
+            LIMIT 5
+            """,
+            (user_id,),
+        )
+
+        rows = cur.fetchall()
+
+        print("sending this back ====>> ", rows)
         comments = [
             {"id": row[0], "content": row[1], "created_at": row[2].isoformat()}
             for row in rows
