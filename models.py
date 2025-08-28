@@ -9,6 +9,9 @@ class CreateComment(BaseModel):
     target_type: str # "user" | "video" | "post",
     target_id: UUID # unique ID of the page, maybe the slug?
     content: str # the actual html string thing
+    author_name: str # author of the post, who wrote the comment, eg. "Tom"
+    author_profile_picture: str # author's pic of the post, who wrote the comment, eg. "Tom"
+    
 
 class UserProfile(BaseModel):
     first_name: str

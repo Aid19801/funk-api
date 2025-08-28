@@ -374,29 +374,60 @@ def reset_password(token: str = Body(...), new_password: str = Body(...)):
 @app.post("/comments")
 def create_comment(
     comment: CreateComment,
-    current_user: str = Depends(get_current_user),
+    current_user: dict = Depends(get_current_user),
 ):
     conn = get_conn()
     cur = conn.cursor()
     try:
+        # Fetch profile details from DB to enforce check
         cur.execute(
             """
-            INSERT INTO comments (id, user_id, target_type, target_id, content)
-            VALUES (%s, %s, %s, %s, %s)
+            SELECT first_name, profile_picture
+            FROM user_profiles
+            WHERE user_id = %s
+            """,
+            (current_user["id"],),
+        )
+        profile = cur.fetchone()
+
+        if not profile:
+            raise HTTPException(status_code=400, detail="User profile not found")
+
+        first_name, profile_picture = profile
+
+        if not first_name or not profile_picture:
+            raise HTTPException(
+                status_code=400,
+                detail="You must set a first name and profile picture before posting comments.",
+            )
+
+        # Insert comment with authoritative values from profile
+        cur.execute(
+            """
+            INSERT INTO comments (
+                id, user_id, target_type, target_id, content,
+                author_name, author_profile_picture
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 str(uuid4()),
-                (current_user["id"],),
+                current_user["id"],
                 comment.target_type,
                 str(comment.target_id),
                 comment.content,
+                first_name,          # authoritative
+                profile_picture,     # authoritative
             ),
         )
         conn.commit()
+
         return {"message": "Comment posted"}
+
     except psycopg2.Error as e:
         conn.rollback()
         raise HTTPException(status_code=400, detail="Comment failed: " + str(e))
+
     finally:
         cur.close()
         conn.close()
@@ -409,7 +440,7 @@ def list_comments(target_type: str, target_id: UUID):
     try:
         cur.execute(
             """
-            SELECT user_id, content, created_at
+            SELECT user_id, content, created_at, author_name, author_profile_picture
             FROM comments
             WHERE target_type = %s AND target_id = %s
             ORDER BY created_at ASC
@@ -417,11 +448,11 @@ def list_comments(target_type: str, target_id: UUID):
             (target_type, str(target_id)),
         )
         rows = cur.fetchall()
-        
-        return [
-            {"user_id": row[0], "content": row[1], "created_at": row[2].isoformat()}
+        comments = [
+             {"user_id": row[0], "content": row[1], "created_at": row[2].isoformat(), "author_name": row[3], "author_profile_picture": row[4]}
             for row in rows
         ]
+        return {"comments": comments}
     finally:
         cur.close()
         conn.close()
@@ -433,7 +464,7 @@ def list_my_comments(current_user: dict = Depends(get_current_user)):
     try:
         cur.execute(
             """
-            SELECT id, content, created_at
+            SELECT id, content, created_at, author_name, author_profile_picture, user_id
             FROM comments
             WHERE user_id = %s
             ORDER BY created_at DESC
@@ -443,7 +474,7 @@ def list_my_comments(current_user: dict = Depends(get_current_user)):
         )
         rows = cur.fetchall()
         comments = [
-            {"id": row[0], "content": row[1], "created_at": row[2].isoformat()}
+            {"id": row[0], "content": row[1], "created_at": row[2].isoformat(), "author_name": row[3], "author_profile_picture": row[4], "user_id": row[5],}
             for row in rows
         ]
         return {"comments": comments}
@@ -460,7 +491,7 @@ def list_user_comments(user_id: str):
     try:
         cur.execute(
             """
-            SELECT id, content, created_at
+            SELECT id, content, created_at, author_name, author_profile_picture, user_id
             FROM comments
             WHERE user_id = %s
             ORDER BY created_at DESC
@@ -473,7 +504,7 @@ def list_user_comments(user_id: str):
 
         print("sending this back ====>> ", rows)
         comments = [
-            {"id": row[0], "content": row[1], "created_at": row[2].isoformat()}
+            {"id": row[0], "content": row[1], "created_at": row[2].isoformat(), "author_name": row[3], "author_profile_picture": row[4], "user_id": row[5]}
             for row in rows
         ]
         return {"comments": comments}
