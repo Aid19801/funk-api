@@ -162,7 +162,7 @@ def signup(req: SignupRequest):
                 "first_name": "",
                 "last_name": "",
                 "email": req.email,
-                "profile_picture": "https://t3.ftcdn.net/jpg/11/61/33/44/360_F_1161334476_RF0ScQ0v1KQ5bRyiYIkj0SixXMJUdqly.jpg",
+                "profile_picture": "",
             },
         }
     except psycopg2.IntegrityError as e:
@@ -443,7 +443,7 @@ def list_comments(target_type: str, target_id: UUID):
             SELECT user_id, content, created_at, author_name, author_profile_picture
             FROM comments
             WHERE target_type = %s AND target_id = %s
-            ORDER BY created_at ASC
+            ORDER BY created_at DESC
             """,
             (target_type, str(target_id)),
         )
