@@ -8,9 +8,12 @@ import jwt  # PyJWT
 import datetime
 from uuid import uuid4, UUID
 
+from apscheduler.schedulers.background import BackgroundScheduler
+
 from models import SignupRequest, LoginRequest, CreateUserProfile, UserProfile, CreateComment
 from db import SECRET_KEY, get_conn
 from util import get_current_user  # <-- MUST now decode JWT and return user_id (UUID as str)
+from feed import fetch_feed, latest_feed
 
 app = FastAPI()
 
@@ -18,6 +21,10 @@ app = FastAPI()
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 UPLOAD_DIR = "uploads/profile_pics"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+bsky_handle = "aidthompsin.bsky.social"
+bsky_pw = "p4ei-4zv5-si3v-v3io"
+bsky_pw_name = "funk-api"
 
 # CORS
 origins = [
@@ -33,8 +40,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# def get_conn():
-#     return psycopg2.connect(DATABASE_URL)
+@app.on_event("startup")
+def start_scheduler():
+    fetch_feed()
+    scheduler = BackgroundScheduler()
+    scheduler.add_job(fetch_feed, "interval", hours=3)
+    scheduler.start()
+
+@app.get("/feed")
+def get_feed():
+    res = fetch_feed()
+    print(res)
+    return res
 
 @app.get("/")
 def read_root():
@@ -511,3 +528,6 @@ def list_user_comments(user_id: str):
     finally:
         cur.close()
         conn.close()
+
+
+

@@ -11,7 +11,7 @@ class CreateComment(BaseModel):
     content: str # the actual html string thing
     author_name: str # author of the post, who wrote the comment, eg. "Tom"
     author_profile_picture: str # author's pic of the post, who wrote the comment, eg. "Tom"
-    
+
 
 class UserProfile(BaseModel):
     first_name: str
@@ -34,4 +34,4 @@ class SignupRequest(BaseModel):
 class LoginRequest(BaseModel):
     email: str
     password: str
-
+    
