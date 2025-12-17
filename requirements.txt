@@ -9,7 +9,4 @@ dotenv
 python-multipart
 apscheduler
 requests
-datetime
 atproto
-smtplib
-email
