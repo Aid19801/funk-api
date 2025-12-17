@@ -28,10 +28,6 @@ app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 UPLOAD_DIR = "uploads/profile_pics"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-bsky_handle = "aidthompsin.bsky.social"
-bsky_pw = "p4ei-4zv5-si3v-v3io"
-bsky_pw_name = "funk-api"
-
 # CORS
 origins = [
     "http://localhost:3000",
