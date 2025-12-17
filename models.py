@@ -6,12 +6,11 @@ class CommentRequest(BaseModel):
     content: str
 
 class CreateComment(BaseModel):
-    target_type: str # "user" | "video" | "post",
-    target_id: UUID # unique ID of the page, maybe the slug?
-    content: str # the actual html string thing
-    author_name: str # author of the post, who wrote the comment, eg. "Tom"
-    author_profile_picture: str # author's pic of the post, who wrote the comment, eg. "Tom"
-
+    target_type: str  # e.g. "podcast" or "youtube"
+    target_id: str    # now allows slugs like "/podcast/b9044..."
+    content: str
+    author_name: Optional[str] = None
+    author_profile_picture: Optional[str] = None
 
 class UserProfile(BaseModel):
     first_name: str

@@ -1,5 +1,7 @@
 from fastapi import FastAPI, File, UploadFile, Depends, HTTPException, Body, Form
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+
 from fastapi.middleware.cors import CORSMiddleware
 import os
 import psycopg2
@@ -14,6 +16,10 @@ from models import SignupRequest, LoginRequest, CreateUserProfile, UserProfile, 
 from db import SECRET_KEY, get_conn
 from util import get_current_user  # <-- MUST now decode JWT and return user_id (UUID as str)
 from feed import fetch_feed, latest_feed
+import smtplib
+from email.message import EmailMessage
+
+TITAN_PW = os.getenv("TITAN_PW")
 
 app = FastAPI()
 
@@ -30,7 +36,7 @@ bsky_pw_name = "funk-api"
 origins = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
-    # "https://yourfrontend.com",
+    "https://funk-27.co.uk",
 ]
 app.add_middleware(
     CORSMiddleware,
@@ -340,13 +346,36 @@ def update_user_profile(
 
 # ---------- PASSWORD RESET (EMAIL-BASED TOKEN) ----------
 
+def send_reset_email(to_email, reset_token):
+    sender_email = "aid@funk-27.co.uk"
+    # reset_url = f"http://localhost:3000/reset-password?token={reset_token}" # dev
+    reset_url = f"https://funk-27.co.uk/reset-password?token={reset_token}" # prod
+    msg = EmailMessage()
+    msg["Subject"] = "Reset Your Password"
+    msg["From"] = sender_email
+    msg["To"] = to_email
+    msg.set_content(f"Click here to reset your password 👉🏻 {reset_url} 👈🏻")
+
+    with smtplib.SMTP_SSL("smtp.titan.email", 465) as server:
+        server.login(sender_email, TITAN_PW)
+        server.send_message(msg)
+        print("✅ password reset-link sent by email.")
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
 @app.post("/forgot-password")
-def forgot_password(email: str):
+def forgot_password(payload: ForgotPasswordRequest):
+    email = payload.email
+    print("🚨 ", email, " email is resetting...")
+
     conn = get_conn()
     cur = conn.cursor()
     try:
-        cur.execute("SELECT id FROM users WHERE email = %s", (email,))
+        cur.execute("SELECT id FROM users WHERE LOWER(email) = LOWER(%s)", (email,))
         user = cur.fetchone()
+        print("DB user result:", user)
         if not user:
             raise HTTPException(status_code=404, detail="Email not found")
 
@@ -358,14 +387,23 @@ def forgot_password(email: str):
             SECRET_KEY,
             algorithm="HS256",
         )
-        # In production, email this token
-        return {"reset_token": reset_token}
+        send_reset_email(email, reset_token)
+        return { "message": "If this email exists, a reset link has been sent.", "status": 200 }
     finally:
         cur.close()
         conn.close()
 
+class ResetPasswordRequest(BaseModel):
+    reset_token: str
+    new_password: str
+
 @app.post("/reset-password")
-def reset_password(token: str = Body(...), new_password: str = Body(...)):
+def reset_password(payload: ResetPasswordRequest):
+    token = payload.reset_token
+    new_password = payload.new_password
+
+    print(f"token is {token}")
+    print(f"new_password is {new_password}")
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
         email = payload.get("sub")
@@ -387,7 +425,6 @@ def reset_password(token: str = Body(...), new_password: str = Body(...)):
         conn.close()
 
 # ---------- COMMENTS ----------
-
 @app.post("/comments")
 def create_comment(
     comment: CreateComment,
@@ -396,7 +433,7 @@ def create_comment(
     conn = get_conn()
     cur = conn.cursor()
     try:
-        # Fetch profile details from DB to enforce check
+        # Enforce valid user profile
         cur.execute(
             """
             SELECT first_name, profile_picture
@@ -418,7 +455,12 @@ def create_comment(
                 detail="You must set a first name and profile picture before posting comments.",
             )
 
-        # Insert comment with authoritative values from profile
+        # Ensure slug-style ID starts with a slash
+        target_id = comment.target_id.strip()
+        if not target_id.startswith("/"):
+            target_id = "/" + target_id
+
+        # Insert comment using authoritative profile data
         cur.execute(
             """
             INSERT INTO comments (
@@ -431,67 +473,89 @@ def create_comment(
                 str(uuid4()),
                 current_user["id"],
                 comment.target_type,
-                str(comment.target_id),
+                target_id,
                 comment.content,
-                first_name,          # authoritative
-                profile_picture,     # authoritative
+                first_name,
+                profile_picture,
             ),
         )
         conn.commit()
 
-        return {"message": "Comment posted"}
+        return {"message": "Comment posted", "target_id": target_id}
 
     except psycopg2.Error as e:
         conn.rollback()
-        raise HTTPException(status_code=400, detail="Comment failed: " + str(e))
+        raise HTTPException(status_code=400, detail=f"Comment failed: {e.pgerror or str(e)}")
 
     finally:
         cur.close()
         conn.close()
 
-@app.get("/comments/{target_type}/{target_id}")
-def list_comments(target_type: str, target_id: UUID):
-    print("========= NO: list_comments firing =======")
+@app.get("/comments/{target_type}/{target_id:path}")
+def list_comments(target_type: str, target_id: str):
+    """Fetch all comments for a given target_type and target_id (e.g. /comments/podcast/b9044...)"""
     conn = get_conn()
     cur = conn.cursor()
     try:
+        # Construct the correct slug used in DB
+        full_target_id = f"/{target_type}/{target_id}"
+
         cur.execute(
             """
             SELECT user_id, content, created_at, author_name, author_profile_picture
             FROM comments
-            WHERE target_type = %s AND target_id = %s
+            WHERE target_id = %s
             ORDER BY created_at DESC
             """,
-            (target_type, str(target_id)),
+            (full_target_id,),
         )
+
         rows = cur.fetchall()
         comments = [
-             {"user_id": row[0], "content": row[1], "created_at": row[2].isoformat(), "author_name": row[3], "author_profile_picture": row[4]}
+            {
+                "user_id": row[0],
+                "content": row[1],
+                "created_at": row[2].isoformat(),
+                "author_name": row[3],
+                "author_profile_picture": row[4],
+            }
             for row in rows
         ]
         return {"comments": comments}
     finally:
         cur.close()
         conn.close()
+
+
 
 @app.get("/comments/me")
 def list_my_comments(current_user: dict = Depends(get_current_user)):
+    """Fetch recent comments by the logged-in user"""
     conn = get_conn()
     cur = conn.cursor()
     try:
         cur.execute(
             """
-            SELECT id, content, created_at, author_name, author_profile_picture, user_id
+            SELECT id, content, created_at, author_name, author_profile_picture, user_id, target_id
             FROM comments
             WHERE user_id = %s
             ORDER BY created_at DESC
-            LIMIT 5
+            LIMIT 10
             """,
-            (current_user["id"],),  # <-- use the UUID string
+            (current_user["id"],),
         )
+
         rows = cur.fetchall()
         comments = [
-            {"id": row[0], "content": row[1], "created_at": row[2].isoformat(), "author_name": row[3], "author_profile_picture": row[4], "user_id": row[5],}
+            {
+                "id": row[0],
+                "content": row[1],
+                "created_at": row[2].isoformat(),
+                "author_name": row[3],
+                "author_profile_picture": row[4],
+                "user_id": row[5],
+                "target_id": row[6],
+            }
             for row in rows
         ]
         return {"comments": comments}
@@ -499,35 +563,38 @@ def list_my_comments(current_user: dict = Depends(get_current_user)):
         cur.close()
         conn.close()
 
+
 @app.get("/recent_activity/{user_id}")
 def list_user_comments(user_id: str):
-    print("====== is this even firing tho? ===========")
+    """Fetch recent comments by any given user (for their profile page)"""
     conn = get_conn()
     cur = conn.cursor()
-    print(2222222)
     try:
         cur.execute(
             """
-            SELECT id, content, created_at, author_name, author_profile_picture, user_id
+            SELECT id, content, created_at, author_name, author_profile_picture, user_id, target_id
             FROM comments
             WHERE user_id = %s
             ORDER BY created_at DESC
-            LIMIT 5
+            LIMIT 10
             """,
             (user_id,),
         )
 
         rows = cur.fetchall()
-
-        print("sending this back ====>> ", rows)
         comments = [
-            {"id": row[0], "content": row[1], "created_at": row[2].isoformat(), "author_name": row[3], "author_profile_picture": row[4], "user_id": row[5]}
+            {
+                "id": row[0],
+                "content": row[1],
+                "created_at": row[2].isoformat(),
+                "author_name": row[3],
+                "author_profile_picture": row[4],
+                "user_id": row[5],
+                "target_id": row[6],
+            }
             for row in rows
         ]
         return {"comments": comments}
     finally:
         cur.close()
         conn.close()
-
-
-
