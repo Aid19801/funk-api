@@ -67,9 +67,9 @@ def fetch_videos_from_playlist(playlist_id: str, max_results: int = 5, include_l
             "id": video_id,
             "title": snippet["title"],
             "platform": "youtube",
-            "link": f"https://www.youtube.com/watch?v={video_id}",
-            "description": snippet.get("description", ""),
-            "thumbnail": snippet.get("thumbnails", {}).get("high", {}).get("url"),
+            "external_link": f"https://www.youtube.com/watch?v={video_id}",
+            "text": snippet.get("description", ""),
+            "image": snippet.get("thumbnails", {}).get("high", {}).get("url"),
             "published_at": snippet.get("publishedAt"),
             "channel_title": snippet.get("channelTitle"),
             "channel_id": snippet.get("channelId"),
@@ -82,10 +82,10 @@ def fetch_youtube_feed():
     """
     Fetch recent YouTube videos from AID, Supertanskiii, and Graham.
     Ordered as:
-      1. AID most recent
-      2. Supertanskiii most recent
-      3. AID second most recent
-      4. Graham most recent (includes livestreams)
+      1. aid most recent
+      2. supertanskiii most recent
+      3. aid second most recent
+      4. graham most recent (includes livestreams)
     """
     try:
         # Get each channel’s uploads playlist

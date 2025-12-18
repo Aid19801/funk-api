@@ -34,3 +34,15 @@ class LoginRequest(BaseModel):
     email: str
     password: str
     
+class ContentType(BaseModel):
+    id: str
+    platform: str
+    title: str
+    text: str
+    image: str
+    external_link: str
+    internal_link: str
+    published_at: str
+    channel_title: Optional[str] = None # youtube only
+    channel_id: Optional[str] = None # youtube only
+    audio_url: Optional[str] = None # pinecast/podcast only

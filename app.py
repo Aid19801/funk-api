@@ -16,6 +16,7 @@ from models import SignupRequest, LoginRequest, CreateUserProfile, UserProfile, 
 from db import SECRET_KEY, get_conn
 from util import get_current_user  # <-- MUST now decode JWT and return user_id (UUID as str)
 from feed import fetch_feed, latest_feed
+from get_pinecast import get_podcast
 import smtplib
 from email.message import EmailMessage
 
@@ -522,8 +523,6 @@ def list_comments(target_type: str, target_id: str):
         cur.close()
         conn.close()
 
-
-
 @app.get("/comments/me")
 def list_my_comments(current_user: dict = Depends(get_current_user)):
     """Fetch recent comments by the logged-in user"""
@@ -559,7 +558,6 @@ def list_my_comments(current_user: dict = Depends(get_current_user)):
         cur.close()
         conn.close()
 
-
 @app.get("/recent_activity/{user_id}")
 def list_user_comments(user_id: str):
     """Fetch recent comments by any given user (for their profile page)"""
@@ -594,3 +592,9 @@ def list_user_comments(user_id: str):
     finally:
         cur.close()
         conn.close()
+
+
+@app.get("/podcast")
+def list_podcast_eps():
+    items = get_podcast()
+    return items
