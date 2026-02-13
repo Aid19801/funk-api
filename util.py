@@ -1,10 +1,10 @@
-from fastapi import Depends, Request, HTTPException
+from fastapi import Depends, HTTPException
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-import jwt  # PyJWT
-from db import SECRET_KEY
-from db import get_conn
+import jwt
+from db import SECRET_KEY, get_db
 
 auth_scheme = HTTPBearer()
+
 
 def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(auth_scheme)):
     token = credentials.credentials
@@ -13,14 +13,9 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(auth_sc
         user_id = payload.get("sub")
         if not user_id:
             raise HTTPException(status_code=401, detail="Invalid token.")
-        conn = get_conn()
-        cur = conn.cursor()
-        cur.execute("SELECT id, email FROM users WHERE id = %s", (user_id,))
-        user = cur.fetchone()
-        print("found user? ", user)
-        cur.close()
-        conn.close()
-
+        with get_db() as (conn, cur):
+            cur.execute("SELECT id, email FROM users WHERE id = %s", (user_id,))
+            user = cur.fetchone()
         if not user:
             raise HTTPException(status_code=401, detail="User not found.")
         return {"id": user[0], "email": user[1]}

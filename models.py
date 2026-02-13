@@ -1,9 +1,6 @@
 from pydantic import BaseModel
 from typing import Optional
-from uuid import UUID
 
-class CommentRequest(BaseModel):
-    content: str
 
 class CreateComment(BaseModel):
     target_type: str  # e.g. "podcast" or "youtube"
@@ -11,6 +8,7 @@ class CreateComment(BaseModel):
     content: str
     author_name: Optional[str] = None
     author_profile_picture: Optional[str] = None
+
 
 class UserProfile(BaseModel):
     first_name: str
@@ -23,17 +21,25 @@ class UserProfile(BaseModel):
     credit_card_encrypted: Optional[str] = None
 
 
-class CreateUserProfile(BaseModel):
-    user_profile: UserProfile
-
 class SignupRequest(BaseModel):
     email: str
     password: str
 
+
 class LoginRequest(BaseModel):
     email: str
     password: str
-    
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+
+class ResetPasswordRequest(BaseModel):
+    reset_token: str
+    new_password: str
+
+
 class ContentType(BaseModel):
     id: str
     platform: str
@@ -43,6 +49,6 @@ class ContentType(BaseModel):
     external_link: str
     internal_link: str
     published_at: str
-    channel_title: Optional[str] = None # youtube only
-    channel_id: Optional[str] = None # youtube only
-    audio_url: Optional[str] = None # pinecast/podcast only
+    channel_title: Optional[str] = None  # youtube only
+    channel_id: Optional[str] = None     # youtube only
+    audio_url: Optional[str] = None      # pinecast/podcast only
