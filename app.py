@@ -9,7 +9,7 @@ import psycopg2
 import smtplib
 from email.message import EmailMessage
 
-from fastapi import FastAPI, File, UploadFile, Depends, HTTPException
+from fastapi import FastAPI, File, UploadFile, Depends, HTTPException, Query
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -20,7 +20,9 @@ from models import (
 )
 from db import SECRET_KEY, get_db
 from util import get_current_user
-from feed import fetch_feed, latest_feed
+from feed import build_feed_page, FEED_MAX_PAGES
+from get_youtube import fetch_all_youtube, youtube_cache
+from get_bluesky import fetch_all_bluesky
 from get_pinecast import get_podcast
 
 TITAN_PW = os.getenv("TITAN_PW")
@@ -32,9 +34,11 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    fetch_feed()
+    fetch_all_youtube()
+    fetch_all_bluesky()
     scheduler = BackgroundScheduler()
-    scheduler.add_job(fetch_feed, "interval", hours=3)
+    scheduler.add_job(fetch_all_youtube, "interval", hours=1)
+    scheduler.add_job(fetch_all_bluesky, "interval", hours=1)
     scheduler.start()
     yield
     scheduler.shutdown()
@@ -59,8 +63,25 @@ app.add_middleware(
 
 
 @app.get("/feed")
-def get_feed():
-    return latest_feed
+def get_feed(page: int = Query(1, ge=1, le=FEED_MAX_PAGES)):
+    return build_feed_page(page)
+
+
+PAGE_SIZE = 50
+MAX_PAGES = 4
+
+
+@app.get("/youtube")
+def get_youtube(page: int = Query(1, ge=1, le=MAX_PAGES)):
+    items = youtube_cache["items"]
+    start = (page - 1) * PAGE_SIZE
+    end = start + PAGE_SIZE
+    total_pages = min(MAX_PAGES, -(-len(items) // PAGE_SIZE))  # ceil division, capped at 4
+    return {
+        "items": items[start:end],
+        "page": page,
+        "total_pages": total_pages,
+    }
 
 
 @app.get("/")

@@ -1,10 +1,12 @@
 import os
+import datetime
 import requests
 
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
 AID_CHANNEL_ID = os.getenv("AID_CHANNEL_ID")
-SUPER_CHANNEL_ID = os.getenv("SUPER_CHANNEL_ID")
-GRAHAM_CHANNEL_ID = os.getenv("GRAHAM_CHANNEL_ID")
+AID_CLIPS_CHANNEL_ID = os.getenv("AID_CLIPS_CHANNEL_ID")
+
+youtube_cache = {"items": [], "last_updated": None}
 
 
 def get_uploads_playlist_id(channel_id: str) -> str:
@@ -15,16 +17,15 @@ def get_uploads_playlist_id(channel_id: str) -> str:
         f"&id={channel_id}"
         f"&key={YOUTUBE_API_KEY}"
     )
-    res = requests.get(url)
+    res = requests.get(url, timeout=10)
     res.raise_for_status()
     data = res.json()
     return data["items"][0]["contentDetails"]["relatedPlaylists"]["uploads"]
 
 
-def fetch_videos_from_playlist(playlist_id: str, max_results: int = 5, include_live=False):
+def fetch_videos_from_playlist(playlist_id: str, max_results: int = 50):
     """
     Fetch the most recent videos from a YouTube playlist.
-    Optionally exclude live streams if include_live=False.
     Returns a list of dicts containing video metadata.
     """
     url = (
@@ -51,16 +52,10 @@ def fetch_videos_from_playlist(playlist_id: str, max_results: int = 5, include_l
         content_details = item.get("contentDetails", {})
         video_id = content_details.get("videoId")
 
-        # fallback if missing
         if not video_id:
             video_id = snippet.get("resourceId", {}).get("videoId")
 
         if not video_id or not snippet.get("title"):
-            continue
-
-        # optionally skip live or premiere titles
-        title_lower = snippet["title"].lower()
-        if not include_live and ("live" in title_lower or "premiere" in title_lower):
             continue
 
         videos.append({
@@ -78,44 +73,35 @@ def fetch_videos_from_playlist(playlist_id: str, max_results: int = 5, include_l
     return videos
 
 
-def fetch_youtube_feed():
+def fetch_all_youtube():
     """
-    Fetch recent YouTube videos from AID, Supertanskiii, and Graham.
-    Ordered as:
-      1. aid most recent
-      2. supertanskiii most recent
-      3. aid second most recent
-      4. graham most recent (includes livestreams)
+    Fetch 50 videos from AID main channel + 50 from clips channel.
+    Combine, sort by date, and update the in-memory cache.
+    Called on startup and every hour by the scheduler.
     """
     try:
-        # Get each channel’s uploads playlist
-        aid_uploads_id = get_uploads_playlist_id(AID_CHANNEL_ID)
-        super_uploads_id = get_uploads_playlist_id(SUPER_CHANNEL_ID)
-        graham_uploads_id = get_uploads_playlist_id(GRAHAM_CHANNEL_ID)
+        aid_playlist = get_uploads_playlist_id(AID_CHANNEL_ID)
+        clips_playlist = get_uploads_playlist_id(AID_CLIPS_CHANNEL_ID)
 
-        # Fetch videos
-        aid_videos = fetch_videos_from_playlist(aid_uploads_id, max_results=5, include_live=False)
-        super_videos = fetch_videos_from_playlist(super_uploads_id, max_results=3, include_live=False)
-        graham_videos = fetch_videos_from_playlist(graham_uploads_id, max_results=1, include_live=True)
+        aid_videos = fetch_videos_from_playlist(aid_playlist, max_results=50)
+        clips_videos = fetch_videos_from_playlist(clips_playlist, max_results=50)
 
-        # Order results
-        ordered = []
-        if aid_videos:
-            ordered.append(aid_videos[0])  # your most recent
-        if super_videos:
-            ordered.append(super_videos[0])  # Supertanskiii’s most recent
-        if len(aid_videos) > 1:
-            ordered.append(aid_videos[1])  # your second most recent
-        if graham_videos:
-            ordered.append(graham_videos[0])  # Graham’s most recent (likely livestream)
+        combined = aid_videos + clips_videos
+        combined.sort(key=lambda v: v.get("published_at", ""), reverse=True)
 
-        return ordered
-
+        youtube_cache["items"] = combined
+        youtube_cache["last_updated"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
     except Exception as e:
-        print(f"Error fetching YouTube feed: {e}")
-        return []
+        print(f"Error fetching YouTube data: {e}")
+
+    return youtube_cache
 
 
-if __name__ == "__main__":
-    from pprint import pprint
-    pprint(fetch_youtube_feed())
+def fetch_youtube_feed():
+    """Return a handful of recent videos for the homepage feed."""
+    if youtube_cache["items"]:
+        return youtube_cache["items"][:4]
+
+    # Fallback: populate cache first if empty
+    fetch_all_youtube()
+    return youtube_cache["items"][:4]

@@ -1,45 +1,42 @@
-import os
+import datetime
 import requests
-from dotenv import load_dotenv
 
-load_dotenv()
+bluesky_cache = {"items": [], "last_updated": None}
 
-def fetch_bluesky():
+
+def fetch_all_bluesky():
+    """
+    Fetch up to 100 posts from Bluesky, cache in memory.
+    Called on startup and hourly by the scheduler.
+    """
     handles = [
         "aidthompsin.bsky.social",
-        "supertanskiiii.bsky.social",
-        "grahamdavidhughes.bsky.social",
     ]
 
-    bluesky_posts = []
+    all_posts = []
 
     for handle in handles:
         try:
-            url = f"https://public.api.bsky.app/xrpc/app.bsky.feed.getAuthorFeed?actor={handle}&limit=5"
+            url = f"https://public.api.bsky.app/xrpc/app.bsky.feed.getAuthorFeed?actor={handle}&limit=100"
             response = requests.get(url, timeout=10)
             response.raise_for_status()
             data = response.json()
 
-            feed_items = data.get("feed", [])
-
-            for item in feed_items:
+            for item in data.get("feed", []):
                 post = item.get("post", {})
                 record = post.get("record", {})
 
-                # ✅ Skip if no text
                 text = record.get("text")
                 if not text:
                     continue
 
-                # ✅ Skip reposts
                 if item.get("reasonType") == "repost":
                     continue
 
-                # ✅ Skip replies
                 if record.get("reply"):
                     continue
 
-                bluesky_posts.append({
+                all_posts.append({
                     "title": "bluesky",
                     "platform": "bluesky",
                     "author": post.get("author", {}).get("handle", handle),
@@ -50,4 +47,6 @@ def fetch_bluesky():
         except Exception as e:
             print(f"Error fetching Bluesky posts for {handle}: {e}")
 
-    return bluesky_posts
+    bluesky_cache["items"] = all_posts
+    bluesky_cache["last_updated"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    return bluesky_cache

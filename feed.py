@@ -1,47 +1,54 @@
-import datetime
-from get_youtube import fetch_youtube_feed
-from get_bluesky import fetch_bluesky
+from get_youtube import youtube_cache
+from get_bluesky import bluesky_cache
+from db import get_db
 
-latest_feed = {"items": [], "last_updated": None}
+FEED_PER_SOURCE = 10
+FEED_MAX_PAGES = 10
 
 
-def fetch_feed():
-    youtube_items = fetch_youtube_feed()
-    bluesky_items = fetch_bluesky()
-    f27_comments = [
-        {
-            "author": "Johnny Davies",
-            "platform": "f27",
-            "author_profile_picture": "/default-profile.png",
-            "text": "Lorum ipsom and foo bar and other stuff. New video just dropped about and badgers are great. ALSO: why I think it's inevitable now that Keir Starmer will be ousted and probably sooner rather than later. Check it…",
-            "timestamp": "1756920114014",
-        },
-        {
-            "author": "Davy Johnson",
-            "platform": "f27",
-            "author_profile_picture": "/default-profile.png",
-            "text": "Lorum ipsom and foo bar and other stuff. New video just dropped about and badgers are great. ALSO: why I think it's inevitable now that Keir Starmer will be ousted and probably sooner rather than later. Check it…",
-            "timestamp": "1756920114014",
-        },
-        {
-            "author": "Phillip Joanerooo",
-            "platform": "f27",
-            "author_profile_picture": "/default-profile.png",
-            "text": "Lorum ipsom and foo bar and other stuff. New video just dropped about and badgers are great. ALSO: why I think it's inevitable now that Keir Starmer will be ousted and probably sooner rather than later. Check it…",
-            "timestamp": "1756920114014",
-        },
-        {
-            "author": "Janet Ballface",
-            "platform": "f27",
-            "author_profile_picture": "/default-profile.png",
-            "text": "Lorum ipsom and foo bar and other stuff. New video just dropped about and badgers are great. ALSO: why I think it's inevitable now that Keir Starmer will be ousted and probably sooner rather than later. Check it…",
-            "timestamp": "1756920114014",
-        },
-    ]
+def build_feed_page(page: int):
+    """
+    Build a single feed page by combining:
+      - 10 youtube items (from cache)
+      - 10 bluesky items (from cache)
+      - up to 10 comments (live from DB)
+    """
+    offset = (page - 1) * FEED_PER_SOURCE
 
-    combined = youtube_items + bluesky_items + f27_comments
+    youtube_slice = youtube_cache["items"][offset:offset + FEED_PER_SOURCE]
+    bluesky_slice = bluesky_cache["items"][offset:offset + FEED_PER_SOURCE]
 
-    # Mutate in place so importers keep a live reference
-    latest_feed["items"] = combined
-    latest_feed["last_updated"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
-    return latest_feed
+    # Comments come live from DB so they're always fresh
+    comments = []
+    with get_db() as (conn, cur):
+        cur.execute(
+            """
+            SELECT id, user_id, content, created_at, author_name,
+                   author_profile_picture, target_id
+            FROM comments
+            ORDER BY created_at DESC
+            LIMIT %s OFFSET %s
+            """,
+            (FEED_PER_SOURCE, offset),
+        )
+        comments = [
+            {
+                "id": row[0],
+                "user_id": row[1],
+                "text": row[2],
+                "timestamp": row[3].isoformat(),
+                "author": row[4],
+                "author_profile_picture": row[5],
+                "target_id": row[6],
+                "platform": "f27",
+            }
+            for row in cur.fetchall()
+        ]
+
+    items = youtube_slice + bluesky_slice + comments
+
+    return {
+        "items": items,
+        "page": page,
+        "max_pages": FEED_MAX_PAGES,
+    }
