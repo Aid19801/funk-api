@@ -122,11 +122,17 @@ async def upload_profile_picture(
     if file_ext not in [".jpg", ".jpeg", ".png"]:
         raise HTTPException(status_code=400, detail="Only .jpg, .jpeg, .png allowed.")
 
-    file_name = f"{current_user['id']}{file_ext}"
+    file_name = f"{current_user['id']}.jpg"
     file_path = os.path.join(UPLOAD_DIR, file_name)
 
-    with open(file_path, "wb") as buffer:
-        buffer.write(await file.read())
+    if file_ext == ".png":
+        from PIL import Image
+        import io
+        img = Image.open(io.BytesIO(await file.read())).convert("RGB")
+        img.save(file_path, "JPEG", quality=85)
+    else:
+        with open(file_path, "wb") as buffer:
+            buffer.write(await file.read())
 
     with get_db() as (conn, cur):
         cur.execute(
