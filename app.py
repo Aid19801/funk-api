@@ -17,6 +17,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from models import (
     SignupRequest, LoginRequest, UserProfile,
     CreateComment, ForgotPasswordRequest, ResetPasswordRequest,
+    ContactRequest,
 )
 from db import SECRET_KEY, get_db
 from util import get_current_user
@@ -460,6 +461,25 @@ def list_comments(target_type: str, target_id: str):
 @app.get("/recent_activity/{user_id}")
 def list_user_comments(user_id: str):
     return {"comments": _fetch_user_comments(user_id)}
+
+
+@app.post("/contact")
+def contact(req: ContactRequest):
+    msg = EmailMessage()
+    msg["Subject"] = f"Funk-27 contact from {req.email}"
+    msg["From"] = "aid@funk-27.co.uk"
+    msg["To"] = "aid@funk-27.co.uk"
+    msg["Reply-To"] = req.email
+    msg.set_content(f"From: {req.email}\n\n{req.message}")
+
+    try:
+        with smtplib.SMTP_SSL("smtp.titan.email", 465) as server:
+            server.login("aid@funk-27.co.uk", TITAN_PW)
+            server.send_message(msg)
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to send message.")
+
+    return {"message": "Message sent."}
 
 
 @app.get("/podcast")

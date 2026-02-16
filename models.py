@@ -40,6 +40,11 @@ class ResetPasswordRequest(BaseModel):
     new_password: str
 
 
+class ContactRequest(BaseModel):
+    email: str
+    message: str
+
+
 class ContentType(BaseModel):
     id: str
     platform: str
