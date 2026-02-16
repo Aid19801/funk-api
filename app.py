@@ -21,7 +21,7 @@ from models import (
 )
 from db import SECRET_KEY, get_db
 from util import get_current_user
-from feed import build_feed_page, FEED_MAX_PAGES
+from feed import build_feed_page, refresh_comments_cache, FEED_MAX_PAGES
 from get_youtube import fetch_all_youtube, youtube_cache
 from get_bluesky import fetch_all_bluesky
 from get_pinecast import get_podcast
@@ -37,9 +37,11 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 async def lifespan(app: FastAPI):
     fetch_all_youtube()
     fetch_all_bluesky()
+    refresh_comments_cache()
     scheduler = BackgroundScheduler()
     scheduler.add_job(fetch_all_youtube, "interval", hours=1)
     scheduler.add_job(fetch_all_bluesky, "interval", hours=1)
+    scheduler.add_job(refresh_comments_cache, "interval", minutes=5)
     scheduler.start()
     yield
     scheduler.shutdown()
