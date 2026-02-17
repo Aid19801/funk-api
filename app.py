@@ -20,7 +20,7 @@ from models import (
     ContactRequest,
 )
 from db import SECRET_KEY, get_db
-from util import get_current_user
+from util import get_current_user, require_superuser
 from feed import build_feed_page, refresh_comments_cache, FEED_MAX_PAGES
 from get_youtube import fetch_all_youtube, youtube_cache
 from get_bluesky import fetch_all_bluesky
@@ -232,7 +232,7 @@ def get_user(user_id: str):
     with get_db() as (conn, cur):
         cur.execute(
             """
-            SELECT user_id, first_name, last_name, email, profile_picture, created_at
+            SELECT user_id, first_name, last_name, email, profile_picture, created_at, verified
             FROM user_profiles
             WHERE user_id = %s
             """,
@@ -247,6 +247,7 @@ def get_user(user_id: str):
             "first_name": row[1],
             "profile_picture": row[4],
             "created_at": row[5],
+            "verified": row[6],
         }
 
 
@@ -487,3 +488,19 @@ def contact(req: ContactRequest):
 @app.get("/podcast")
 def list_podcast_eps():
     return get_podcast()
+
+
+# ---------- ADMIN ----------
+
+@app.patch("/admin/verify-user/{user_id}")
+def verify_user(user_id: str, current_user: dict = Depends(require_superuser)):
+    with get_db() as (conn, cur):
+        cur.execute(
+            "UPDATE user_profiles SET verified = TRUE WHERE user_id = %s RETURNING user_id",
+            (user_id,),
+        )
+        result = cur.fetchone()
+        if not result:
+            raise HTTPException(status_code=404, detail="User not found.")
+        conn.commit()
+        return {"message": f"User {user_id} verified."}

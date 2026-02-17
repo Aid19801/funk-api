@@ -19,6 +19,7 @@ class UserProfile(BaseModel):
     address_line_3: Optional[str] = None
     postcode: Optional[str] = None
     credit_card_encrypted: Optional[str] = None
+    verified: Optional[bool] = None
 
 
 class SignupRequest(BaseModel):
