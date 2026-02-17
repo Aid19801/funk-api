@@ -8,9 +8,10 @@ import jwt
 import psycopg2
 import smtplib
 from email.message import EmailMessage
+import cloudinary
+import cloudinary.uploader
 
 from fastapi import FastAPI, File, UploadFile, Depends, HTTPException, Query
-from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from apscheduler.schedulers.background import BackgroundScheduler
 
@@ -29,8 +30,11 @@ from get_pinecast import get_podcast
 TITAN_PW = os.getenv("TITAN_PW")
 FRONTEND_URL = os.getenv("FRONTEND_URL", "https://funk-27.co.uk")
 
-UPLOAD_DIR = "uploads/profile_pics"
-os.makedirs(UPLOAD_DIR, exist_ok=True)
+cloudinary.config(
+    cloud_name=os.getenv("CLOUDINARY_CLOUD_NAME"),
+    api_key=os.getenv("CLOUDINARY_API_KEY"),
+    api_secret=os.getenv("CLOUDINARY_API_SECRET"),
+)
 
 
 @asynccontextmanager
@@ -48,8 +52,6 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
-
-app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 origins = [
     "http://localhost:3000",
@@ -125,27 +127,28 @@ async def upload_profile_picture(
     if file_ext not in [".jpg", ".jpeg", ".png"]:
         raise HTTPException(status_code=400, detail="Only .jpg, .jpeg, .png allowed.")
 
-    file_name = f"{current_user['id']}.jpg"
-    file_path = os.path.join(UPLOAD_DIR, file_name)
-
-    if file_ext == ".png":
-        from PIL import Image
-        import io
-        img = Image.open(io.BytesIO(await file.read())).convert("RGB")
-        img.save(file_path, "JPEG", quality=85)
-    else:
-        with open(file_path, "wb") as buffer:
-            buffer.write(await file.read())
+    try:
+        result = cloudinary.uploader.upload(
+            file.file,
+            public_id=str(current_user["id"]),
+            folder="profile_pics",
+            format="jpg",
+            overwrite=True,
+            transformation=[{"width": 400, "height": 400, "crop": "fill", "gravity": "face"}],
+        )
+        url = result["secure_url"]
+    except Exception:
+        raise HTTPException(status_code=500, detail="Image upload failed.")
 
     with get_db() as (conn, cur):
         cur.execute(
             "UPDATE user_profiles SET profile_picture = %s WHERE user_id = %s",
-            (f"/uploads/profile_pics/{file_name}", current_user["id"]),
+            (url, current_user["id"]),
         )
         conn.commit()
         return {
             "message": "Profile picture updated",
-            "url": f"/uploads/profile_pics/{file_name}",
+            "url": url,
         }
 
 
