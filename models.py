@@ -46,6 +46,10 @@ class ContactRequest(BaseModel):
     message: str
 
 
+class PollVoteRequest(BaseModel):
+    vote: str  # 'yes' or 'no'
+
+
 class ContentType(BaseModel):
     id: str
     platform: str

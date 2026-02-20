@@ -11,14 +11,14 @@ from email.message import EmailMessage
 import cloudinary
 import cloudinary.uploader
 
-from fastapi import FastAPI, File, UploadFile, Depends, HTTPException, Query
+from fastapi import FastAPI, File, UploadFile, Depends, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from models import (
     SignupRequest, LoginRequest, UserProfile,
     CreateComment, ForgotPasswordRequest, ResetPasswordRequest,
-    ContactRequest,
+    ContactRequest, PollVoteRequest,
 )
 from db import SECRET_KEY, get_db
 from util import get_current_user, require_superuser
@@ -491,6 +491,89 @@ def contact(req: ContactRequest):
 @app.get("/podcast")
 def list_podcast_eps():
     return get_podcast()
+
+
+# ---------- POLL ----------
+
+def _poll_response(poll_id, question, yes_votes, no_votes, user_vote):
+    total = yes_votes + no_votes
+    return {
+        "poll_id": str(poll_id),
+        "question": question,
+        "yes_votes": yes_votes,
+        "no_votes": no_votes,
+        "total": total,
+        "yes_percent": round(yes_votes / total * 100) if total > 0 else 0,
+        "no_percent": round(no_votes / total * 100) if total > 0 else 0,
+        "user_vote": user_vote,
+    }
+
+
+@app.get("/poll")
+def get_poll(request: Request):
+    user_id = None
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        token = auth_header[7:]
+        try:
+            payload = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
+            user_id = payload.get("sub")
+        except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
+            pass
+
+    with get_db() as (conn, cur):
+        cur.execute(
+            "SELECT id, question, yes_votes, no_votes FROM polls ORDER BY created_at DESC LIMIT 1"
+        )
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="No poll found.")
+
+        poll_id, question, yes_votes, no_votes = row
+
+        user_vote = None
+        if user_id:
+            cur.execute(
+                "SELECT vote FROM poll_votes WHERE poll_id = %s AND user_id = %s",
+                (poll_id, user_id),
+            )
+            vote_row = cur.fetchone()
+            if vote_row:
+                user_vote = vote_row[0]
+
+        return _poll_response(poll_id, question, yes_votes, no_votes, user_vote)
+
+
+@app.post("/poll/vote")
+def cast_poll_vote(req: PollVoteRequest, current_user: dict = Depends(get_current_user)):
+    if req.vote not in ("yes", "no"):
+        raise HTTPException(status_code=400, detail="Vote must be 'yes' or 'no'.")
+
+    with get_db() as (conn, cur):
+        cur.execute("SELECT id FROM polls ORDER BY created_at DESC LIMIT 1")
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="No active poll.")
+
+        poll_id = row[0]
+
+        try:
+            cur.execute(
+                "INSERT INTO poll_votes (poll_id, user_id, vote) VALUES (%s, %s, %s)",
+                (poll_id, current_user["id"], req.vote),
+            )
+            if req.vote == "yes":
+                cur.execute("UPDATE polls SET yes_votes = yes_votes + 1 WHERE id = %s", (poll_id,))
+            else:
+                cur.execute("UPDATE polls SET no_votes = no_votes + 1 WHERE id = %s", (poll_id,))
+            conn.commit()
+        except psycopg2.IntegrityError:
+            conn.rollback()
+            raise HTTPException(status_code=409, detail="You have already voted in this poll.")
+
+        cur.execute("SELECT question, yes_votes, no_votes FROM polls WHERE id = %s", (poll_id,))
+        question, yes_votes, no_votes = cur.fetchone()
+        return _poll_response(poll_id, question, yes_votes, no_votes, req.vote)
 
 
 # ---------- ADMIN ----------
