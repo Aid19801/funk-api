@@ -21,4 +21,4 @@ CREATE TABLE public.poll_votes (
 
 -- Initial poll question
 INSERT INTO public.polls (question)
-VALUES ('Will Prince Andrew become a weird Alt Right Fake Christian by 2027?');
+VALUES ('');

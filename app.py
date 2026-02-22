@@ -23,7 +23,7 @@ from models import (
 from db import SECRET_KEY, get_db
 from util import get_current_user, require_superuser
 from feed import build_feed_page, refresh_comments_cache, FEED_MAX_PAGES
-from get_youtube import fetch_all_youtube, youtube_cache
+from get_youtube import fetch_all_youtube, youtube_cache, fetch_video_details, fetch_single_video
 from get_bluesky import fetch_all_bluesky
 from get_pinecast import get_podcast
 
@@ -87,6 +87,19 @@ def get_youtube(page: int = Query(1, ge=1, le=MAX_PAGES)):
         "page": page,
         "total_pages": total_pages,
     }
+
+
+@app.get("/youtube/{video_id}/details")
+def get_youtube_video_details(video_id: str):
+    return fetch_video_details(video_id)
+
+
+@app.get("/youtube/{video_id}")
+def get_single_youtube_video(video_id: str):
+    video = fetch_single_video(video_id)
+    if not video:
+        raise HTTPException(status_code=404, detail="Video not found")
+    return video
 
 
 @app.get("/")
