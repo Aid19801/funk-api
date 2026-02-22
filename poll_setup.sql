@@ -21,4 +21,4 @@ CREATE TABLE public.poll_votes (
 
 -- Initial poll question
 INSERT INTO public.polls (question)
-VALUES ('');
+VALUES ('Will Starmer Resign After Gorton By-Election?');

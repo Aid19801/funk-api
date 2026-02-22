@@ -196,7 +196,7 @@ def signup(req: SignupRequest):
 
             payload = {
                 "sub": str(user_id),
-                "exp": datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=1),
+                "exp": datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=7),
             }
             token = jwt.encode(payload, SECRET_KEY, algorithm="HS256")
 
@@ -235,7 +235,7 @@ def login(req: LoginRequest):
 
         payload = {
             "sub": str(user_id),
-            "exp": datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=1),
+            "exp": datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=7),
         }
         token = jwt.encode(payload, SECRET_KEY, algorithm="HS256")
         return {"access_token": token, "token_type": "bearer"}
