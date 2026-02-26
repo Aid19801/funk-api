@@ -506,6 +506,101 @@ def list_podcast_eps():
     return get_podcast()
 
 
+# ---------- SEARCH ----------
+
+@app.get("/search")
+def search(q: str = Query(..., min_length=1)):
+    q_lower = q.lower()
+    results = []
+
+    # Podcast episodes (fetched live from Pinecast RSS)
+    try:
+        for ep in get_podcast():
+            title = ep.get("title", "") or ""
+            summary = ep.get("summary", "") or ""
+            if q_lower in title.lower() or q_lower in summary.lower():
+                guid = ep.get("id", "")
+                idx = guid.find("/guid/")
+                if idx != -1:
+                    uuid = guid[idx + 6:]
+                    img = None
+                    image = ep.get("image")
+                    if image:
+                        img = image.get("href") if isinstance(image, dict) else getattr(image, "href", None)
+                    results.append({
+                        "type": "podcast",
+                        "title": title,
+                        "description": summary[:200],
+                        "image": img,
+                        "slug": f"/posts/podcast/{uuid}",
+                        "published_at": ep.get("published"),
+                    })
+    except Exception:
+        pass
+
+    # YouTube videos (from in-memory cache)
+    for video in youtube_cache.get("items", []):
+        title = video.get("title", "") or ""
+        text = video.get("text", "") or ""
+        if q_lower in title.lower() or q_lower in text.lower():
+            results.append({
+                "type": "youtube",
+                "title": title,
+                "description": text[:200],
+                "image": video.get("image"),
+                "slug": f"/posts/youtube/{video['id']}",
+                "published_at": video.get("published_at"),
+            })
+
+    # Comments + Users (single DB connection)
+    with get_db() as (conn, cur):
+        cur.execute(
+            """
+            SELECT content, created_at, author_name, author_profile_picture, target_id
+            FROM comments
+            WHERE content ILIKE %s OR author_name ILIKE %s
+            ORDER BY created_at DESC
+            LIMIT 20
+            """,
+            (f"%{q}%", f"%{q}%"),
+        )
+        for row in cur.fetchall():
+            results.append({
+                "type": "comment",
+                "title": row[2] or "Anonymous",
+                "description": row[0][:200] if row[0] else "",
+                "image": row[3],
+                "slug": row[4],
+                "published_at": row[1].isoformat() if row[1] else None,
+            })
+
+        cur.execute(
+            """
+            SELECT user_id, first_name, last_name, profile_picture
+            FROM user_profiles
+            WHERE first_name ILIKE %s OR last_name ILIKE %s
+            LIMIT 10
+            """,
+            (f"%{q}%", f"%{q}%"),
+        )
+        for row in cur.fetchall():
+            name = " ".join(filter(None, [row[1] or "", row[2] or ""])).strip() or "Unknown"
+            results.append({
+                "type": "user",
+                "title": name,
+                "description": "",
+                "image": row[3],
+                "slug": f"/user/{row[0]}",
+                "published_at": None,
+            })
+
+    return {
+        "results": results[:10],
+        "query": q,
+        "total": len(results),
+    }
+
+
 # ---------- POLL ----------
 
 def _poll_response(poll_id, question, yes_votes, no_votes, user_vote):
