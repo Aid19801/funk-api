@@ -47,7 +47,7 @@ class ContactRequest(BaseModel):
 
 
 class PollVoteRequest(BaseModel):
-    vote: str  # 'yes' or 'no'
+    option_id: str  # UUID of the chosen poll option
 
 
 class ContentType(BaseModel):

@@ -603,18 +603,25 @@ def search(q: str = Query(..., min_length=1)):
 
 # ---------- POLL ----------
 
-def _poll_response(poll_id, question, yes_votes, no_votes, user_vote):
-    total = yes_votes + no_votes
+def _poll_response(poll_id, question, options, user_vote):
+    total = sum(o["votes"] for o in options)
+    for o in options:
+        o["percent"] = round(o["votes"] / total * 100) if total > 0 else 0
     return {
         "poll_id": str(poll_id),
         "question": question,
-        "yes_votes": yes_votes,
-        "no_votes": no_votes,
+        "options": options,
         "total": total,
-        "yes_percent": round(yes_votes / total * 100) if total > 0 else 0,
-        "no_percent": round(no_votes / total * 100) if total > 0 else 0,
         "user_vote": user_vote,
     }
+
+
+def _fetch_options(cur, poll_id):
+    cur.execute(
+        "SELECT id, label, vote_count FROM poll_options WHERE poll_id = %s ORDER BY display_order",
+        (poll_id,),
+    )
+    return [{"id": str(r[0]), "label": r[1], "votes": r[2]} for r in cur.fetchall()]
 
 
 @app.get("/poll")
@@ -631,57 +638,66 @@ def get_poll(request: Request):
 
     with get_db() as (conn, cur):
         cur.execute(
-            "SELECT id, question, yes_votes, no_votes FROM polls ORDER BY created_at DESC LIMIT 1"
+            "SELECT id, question FROM polls ORDER BY created_at DESC LIMIT 1"
         )
         row = cur.fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="No poll found.")
 
-        poll_id, question, yes_votes, no_votes = row
+        poll_id, question = row
+        options = _fetch_options(cur, poll_id)
 
         user_vote = None
         if user_id:
             cur.execute(
-                "SELECT vote FROM poll_votes WHERE poll_id = %s AND user_id = %s",
+                """SELECT po.label FROM poll_votes pv
+                   JOIN poll_options po ON po.id = pv.option_id
+                   WHERE pv.poll_id = %s AND pv.user_id = %s""",
                 (poll_id, user_id),
             )
             vote_row = cur.fetchone()
             if vote_row:
                 user_vote = vote_row[0]
 
-        return _poll_response(poll_id, question, yes_votes, no_votes, user_vote)
+        return _poll_response(poll_id, question, options, user_vote)
 
 
 @app.post("/poll/vote")
 def cast_poll_vote(req: PollVoteRequest, current_user: dict = Depends(get_current_user)):
-    if req.vote not in ("yes", "no"):
-        raise HTTPException(status_code=400, detail="Vote must be 'yes' or 'no'.")
-
     with get_db() as (conn, cur):
-        cur.execute("SELECT id FROM polls ORDER BY created_at DESC LIMIT 1")
+        cur.execute("SELECT id, question FROM polls ORDER BY created_at DESC LIMIT 1")
         row = cur.fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="No active poll.")
 
-        poll_id = row[0]
+        poll_id, question = row
+
+        cur.execute(
+            "SELECT id, label FROM poll_options WHERE id = %s AND poll_id = %s",
+            (req.option_id, poll_id),
+        )
+        option_row = cur.fetchone()
+        if not option_row:
+            raise HTTPException(status_code=400, detail="Invalid option for this poll.")
+
+        option_id, option_label = option_row
 
         try:
             cur.execute(
-                "INSERT INTO poll_votes (poll_id, user_id, vote) VALUES (%s, %s, %s)",
-                (poll_id, current_user["id"], req.vote),
+                "INSERT INTO poll_votes (poll_id, user_id, option_id) VALUES (%s, %s, %s)",
+                (poll_id, current_user["id"], option_id),
             )
-            if req.vote == "yes":
-                cur.execute("UPDATE polls SET yes_votes = yes_votes + 1 WHERE id = %s", (poll_id,))
-            else:
-                cur.execute("UPDATE polls SET no_votes = no_votes + 1 WHERE id = %s", (poll_id,))
+            cur.execute(
+                "UPDATE poll_options SET vote_count = vote_count + 1 WHERE id = %s",
+                (option_id,),
+            )
             conn.commit()
         except psycopg2.IntegrityError:
             conn.rollback()
             raise HTTPException(status_code=409, detail="You have already voted in this poll.")
 
-        cur.execute("SELECT question, yes_votes, no_votes FROM polls WHERE id = %s", (poll_id,))
-        question, yes_votes, no_votes = cur.fetchone()
-        return _poll_response(poll_id, question, yes_votes, no_votes, req.vote)
+        options = _fetch_options(cur, poll_id)
+        return _poll_response(poll_id, question, options, option_label)
 
 
 # ---------- ADMIN ----------
