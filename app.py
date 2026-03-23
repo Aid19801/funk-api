@@ -832,6 +832,59 @@ def validate_licence(req: LicenceValidateRequest):
     return {"valid": True}
 
 
+# ---------- TRANSCRIBE ----------
+
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
+@app.post("/transcribe")
+async def transcribe_audio(request: Request):
+    import base64, tempfile, httpx
+
+    body = await request.json()
+    licence_key = body.get("licence_key")
+    audio_base64 = body.get("audioBase64")
+
+    if not licence_key or not audio_base64:
+        raise HTTPException(status_code=400, detail="licence_key and audioBase64 required")
+
+    if not OPENAI_API_KEY:
+        raise HTTPException(status_code=500, detail="Transcription not configured")
+
+    # Validate licence
+    with get_db() as (conn, cur):
+        cur.execute("SELECT active FROM licences WHERE key = %s", (licence_key,))
+        row = cur.fetchone()
+    if not row or not row[0]:
+        raise HTTPException(status_code=403, detail="Invalid or inactive licence key")
+
+    # Write audio to temp file and send to OpenAI Whisper
+    audio_bytes = base64.b64decode(audio_base64)
+    with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
+        tmp.write(audio_bytes)
+        tmp_path = tmp.name
+
+    try:
+        async with httpx.AsyncClient(timeout=120) as client:
+            with open(tmp_path, "rb") as f:
+                response = await client.post(
+                    "https://api.openai.com/v1/audio/transcriptions",
+                    headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
+                    files={"file": ("audio.mp3", f, "audio/mpeg")},
+                    data={
+                        "model": "whisper-1",
+                        "response_format": "verbose_json",
+                        "timestamp_granularities[]": "word",
+                    },
+                )
+        if not response.is_success:
+            raise HTTPException(status_code=502, detail=f"Whisper error: {response.text}")
+        result = response.json()
+        return result.get("words", [])
+    finally:
+        import os as _os
+        _os.unlink(tmp_path)
+
+
 # ---------- ADMIN ----------
 
 @app.post("/admin/generate-licence")
