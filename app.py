@@ -23,7 +23,7 @@ from models import (
     ContactRequest, PollVoteRequest, LicenceValidateRequest,
 )
 from db import SECRET_KEY, get_db
-from util import get_current_user, require_superuser
+from util import get_current_user, require_superuser, SUPERUSER_ID
 from feed import build_feed_page, refresh_comments_cache, FEED_MAX_PAGES
 from get_youtube import fetch_all_youtube, youtube_cache, fetch_video_details, fetch_single_video
 from get_bluesky import fetch_all_bluesky
@@ -131,7 +131,9 @@ def get_my_profile(current_user: dict = Depends(get_current_user)):
             raise HTTPException(status_code=404, detail="Profile not found.")
 
         columns = [desc[0] for desc in cur.description]
-        return dict(zip(columns, row))
+        profile = dict(zip(columns, row))
+        profile["is_superuser"] = str(current_user["id"]) == SUPERUSER_ID
+        return profile
 
 
 # ---------- UPLOAD PROFILE PICTURE (AUTH ONLY) ----------
@@ -831,6 +833,51 @@ def validate_licence(req: LicenceValidateRequest):
 
 
 # ---------- ADMIN ----------
+
+@app.post("/admin/generate-licence")
+def admin_generate_licence(email: str, current_user: dict = Depends(require_superuser)):
+    with get_db() as (conn, cur):
+        # Check for existing licence
+        cur.execute(
+            "SELECT key FROM licences WHERE email = %s AND active = TRUE LIMIT 1",
+            (email,),
+        )
+        existing = cur.fetchone()
+        if existing:
+            return {"message": "Licence already exists", "key": existing[0], "email": email}
+
+        # Create user account if not exists
+        cur.execute("SELECT id FROM users WHERE email = %s", (email,))
+        user_row = cur.fetchone()
+        if not user_row:
+            dummy_pw = bcrypt.hashpw(uuid4().hex.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+            cur.execute(
+                "INSERT INTO users (email, password_hash) VALUES (%s, %s) RETURNING id",
+                (email, dummy_pw),
+            )
+            user_id = cur.fetchone()[0]
+            cur.execute(
+                "INSERT INTO user_profiles (user_id, email) VALUES (%s, %s)",
+                (user_id, email),
+            )
+
+        licence_key = _generate_licence_key()
+        cur.execute(
+            """
+            INSERT INTO licences (key, email, active)
+            VALUES (%s, %s, TRUE)
+            """,
+            (licence_key, email),
+        )
+        conn.commit()
+
+    try:
+        _send_licence_email(email, licence_key)
+    except Exception:
+        pass
+
+    return {"message": "Licence generated", "key": licence_key, "email": email}
+
 
 @app.patch("/admin/verify-user/{user_id}")
 def verify_user(user_id: str, current_user: dict = Depends(require_superuser)):
