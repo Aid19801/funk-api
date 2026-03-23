@@ -15,10 +15,12 @@ from fastapi import FastAPI, File, UploadFile, Depends, HTTPException, Query, Re
 from fastapi.middleware.cors import CORSMiddleware
 from apscheduler.schedulers.background import BackgroundScheduler
 
+import stripe
+
 from models import (
     SignupRequest, LoginRequest, UserProfile,
     CreateComment, ForgotPasswordRequest, ResetPasswordRequest,
-    ContactRequest, PollVoteRequest,
+    ContactRequest, PollVoteRequest, LicenceValidateRequest,
 )
 from db import SECRET_KEY, get_db
 from util import get_current_user, require_superuser
@@ -29,6 +31,9 @@ from get_pinecast import get_podcast
 
 TITAN_PW = os.getenv("TITAN_PW")
 FRONTEND_URL = os.getenv("FRONTEND_URL", "https://funk-27.co.uk")
+
+stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
+STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET")
 
 cloudinary.config(
     cloud_name=os.getenv("CLOUDINARY_CLOUD_NAME"),
@@ -698,6 +703,130 @@ def cast_poll_vote(req: PollVoteRequest, current_user: dict = Depends(get_curren
 
         options = _fetch_options(cur, poll_id)
         return _poll_response(poll_id, question, options, option_label)
+
+
+# ---------- VIDEO BASTARD LICENCES ----------
+
+def _generate_licence_key() -> str:
+    import secrets
+    groups = [secrets.token_hex(2).upper() for _ in range(4)]
+    return "-".join(groups)
+
+
+def _send_licence_email(to_email: str, licence_key: str):
+    msg = EmailMessage()
+    msg["Subject"] = "Your Video Bastard licence key"
+    msg["From"] = "aid@funk-27.co.uk"
+    msg["To"] = to_email
+    msg.set_content(
+        f"Thanks for subscribing to Video Bastard!\n\n"
+        f"Your licence key is:\n\n  {licence_key}\n\n"
+        f"Open the app, click 'Activate', and paste this key.\n\n"
+        f"Download: https://github.com/Aid19801/video-bastard/releases\n"
+    )
+    with smtplib.SMTP_SSL("smtp.titan.email", 465) as server:
+        server.login("aid@funk-27.co.uk", TITAN_PW)
+        server.send_message(msg)
+
+
+def _resolve_email_from_stripe(obj: dict) -> tuple[str | None, str | None, str | None]:
+    """Return (email, customer_id, subscription_id) from a Stripe event object."""
+    customer_email = (
+        obj.get("customer_email")
+        or (obj.get("customer_details") or {}).get("email")
+    )
+    customer_id = obj.get("customer")
+    subscription_id = obj.get("subscription") or obj.get("id")
+
+    # customer.subscription.created has no email — fetch from Stripe
+    if not customer_email and customer_id:
+        try:
+            customer = stripe.Customer.retrieve(customer_id)
+            customer_email = customer.get("email")
+        except Exception:
+            pass
+
+    return customer_email, customer_id, subscription_id
+
+
+def _issue_or_resend_licence(customer_email: str, customer_id: str | None, subscription_id: str | None):
+    with get_db() as (conn, cur):
+        cur.execute(
+            "SELECT key FROM licences WHERE email = %s AND active = TRUE LIMIT 1",
+            (customer_email,),
+        )
+        existing = cur.fetchone()
+
+        if existing:
+            licence_key = existing[0]
+        else:
+            licence_key = _generate_licence_key()
+            cur.execute(
+                """
+                INSERT INTO licences (key, stripe_customer_id, stripe_subscription_id, email, active)
+                VALUES (%s, %s, %s, %s, TRUE)
+                ON CONFLICT (key) DO NOTHING
+                """,
+                (licence_key, customer_id, subscription_id, customer_email),
+            )
+            conn.commit()
+
+    try:
+        _send_licence_email(customer_email, licence_key)
+    except Exception:
+        pass  # Don't fail the webhook if email bounces
+
+
+@app.post("/webhook/stripe")
+async def stripe_webhook(request: Request):
+    payload = await request.body()
+    sig_header = request.headers.get("stripe-signature", "")
+
+    try:
+        event = stripe.Webhook.construct_event(payload, sig_header, STRIPE_WEBHOOK_SECRET)
+    except stripe.error.SignatureVerificationError:
+        raise HTTPException(status_code=400, detail="Invalid Stripe signature")
+
+    event_type = event["type"]
+    obj = event["data"]["object"]
+
+    if event_type in (
+        "checkout.session.completed",
+        "invoice.payment_succeeded",
+        "customer.subscription.created",
+    ):
+        customer_email, customer_id, subscription_id = _resolve_email_from_stripe(obj)
+        if customer_email:
+            _issue_or_resend_licence(customer_email, customer_id, subscription_id)
+
+    elif event_type in ("customer.subscription.deleted", "invoice.payment_failed"):
+        subscription_id = obj.get("id") or obj.get("subscription")
+        if subscription_id:
+            with get_db() as (conn, cur):
+                cur.execute(
+                    "UPDATE licences SET active = FALSE WHERE stripe_subscription_id = %s",
+                    (subscription_id,),
+                )
+                conn.commit()
+
+    return {"status": "ok"}
+
+
+@app.post("/licence/validate")
+def validate_licence(req: LicenceValidateRequest):
+    with get_db() as (conn, cur):
+        cur.execute(
+            "SELECT active FROM licences WHERE key = %s",
+            (req.licence_key,),
+        )
+        row = cur.fetchone()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Licence key not found")
+    if not row[0]:
+        raise HTTPException(status_code=403, detail="Licence key is inactive")
+
+    return {"valid": True}
 
 
 # ---------- ADMIN ----------

@@ -50,6 +50,10 @@ class PollVoteRequest(BaseModel):
     option_id: str  # UUID of the chosen poll option
 
 
+class LicenceValidateRequest(BaseModel):
+    licence_key: str
+
+
 class ContentType(BaseModel):
     id: str
     platform: str
