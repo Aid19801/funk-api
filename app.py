@@ -758,18 +758,19 @@ def _issue_or_resend_licence(customer_email: str, customer_id: str | None, subsc
         existing = cur.fetchone()
 
         if existing:
-            licence_key = existing[0]
-        else:
-            licence_key = _generate_licence_key()
-            cur.execute(
-                """
-                INSERT INTO licences (key, stripe_customer_id, stripe_subscription_id, email, active)
-                VALUES (%s, %s, %s, %s, TRUE)
-                ON CONFLICT (key) DO NOTHING
-                """,
-                (licence_key, customer_id, subscription_id, customer_email),
-            )
-            conn.commit()
+            # Key already exists — another event already handled this purchase
+            return
+
+        licence_key = _generate_licence_key()
+        cur.execute(
+            """
+            INSERT INTO licences (key, stripe_customer_id, stripe_subscription_id, email, active)
+            VALUES (%s, %s, %s, %s, TRUE)
+            ON CONFLICT (key) DO NOTHING
+            """,
+            (licence_key, customer_id, subscription_id, customer_email),
+        )
+        conn.commit()
 
     try:
         _send_licence_email(customer_email, licence_key)
