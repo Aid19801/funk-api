@@ -100,7 +100,7 @@ def fetch_videos_from_playlist(playlist_id: str, max_results: int = 50):
             "external_link": f"https://www.youtube.com/watch?v={video_id}",
             "text": snippet.get("description", ""),
             "image": snippet.get("thumbnails", {}).get("high", {}).get("url"),
-            "published_at": snippet.get("publishedAt"),
+            "published_at": content_details.get("videoPublishedAt") or snippet.get("publishedAt"),
             "channel_title": snippet.get("channelTitle"),
             "channel_id": snippet.get("channelId"),
             "like_count": None,
